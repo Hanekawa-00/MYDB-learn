@@ -17,15 +17,87 @@ import top.guoziyang.mydb.backend.parser.statement.Update;
 import top.guoziyang.mydb.backend.parser.statement.Where;
 import top.guoziyang.mydb.common.Error;
 
+/**
+ * SQL语句解析器 - MYDB查询处理模块的核心组件
+ *
+ * 功能概述：
+ * 该类是MYDB系统中SQL语句解析的入口点，负责将用户输入的SQL语句字节数组
+ * 解析成相应的语句对象。类似于MySQL中的sql_parse.cc文件，但MYDB实现了
+ * 一个简化版本的SQL解析器。
+ *
+ * 设计特点：
+ * 1. 递归下降解析器设计：采用递归下降的解析方法，每个SQL语句类型对应一个解析方法
+ * 2. 词法分析与语法分析分离：使用Tokenizer进行词法分析，Parser进行语法分析
+ * 3. 支持基本SQL操作：BEGIN/COMMIT/ABORT事务控制，CREATE/DROP表操作，SELECT/INSERT/UPDATE/DELETE数据操作
+ * 4. 简化的语法规则：相比MySQL，MYDB只支持基本的SQL语法，没有复杂的子查询、联合查询等
+ *
+ * 与MySQL对比：
+ * - MySQL解析器：支持完整的SQL标准，包括复杂的语法结构、函数、存储过程等
+ * - MYDB解析器：只支持基本的SQL操作，语法规则简化，适合学习和理解基本原理
+ *
+ * 解析流程：
+ * 1. 使用Tokenizer将SQL语句分词
+ * 2. 根据第一个关键字确定SQL语句类型
+ * 3. 调用对应的解析方法生成语句对象
+ * 4. 验证语句的完整性和正确性
+ *
+ * @author guoziyang
+ * @see Tokenizer 词法分析器
+ * @see top.guoziyang.mydb.backend.parser.statement 语句对象包
+ */
 public class Parser {
+    /**
+     * SQL语句解析的主入口方法
+     *
+     * 功能说明：
+     * 将输入的SQL语句字节数组解析成对应的语句对象。这个方法是整个解析器的核心，
+     * 采用了类似于MySQL parser的两阶段设计：词法分析 + 语法分析。
+     *
+     * 解析流程：
+     * 1. 创建词法分析器(Tokenizer)对SQL语句进行分词
+     * 2. 获取第一个关键字确定SQL语句类型
+     * 3. 根据语句类型调用相应的解析方法
+     * 4. 验证解析结果的完整性
+     * 5. 返回解析后的语句对象
+     *
+     * 支持的SQL语句类型：
+     * - 事务控制：BEGIN, COMMIT, ABORT
+     * - 表操作：CREATE TABLE, DROP TABLE
+     * - 数据操作：SELECT, INSERT, UPDATE, DELETE
+     * - 元数据查询：SHOW
+     *
+     * 错误处理：
+     * - 词法错误：由Tokenizer抛出
+     * - 语法错误：由各个parse方法抛出
+     * - 语句不完整：检查是否还有未处理的token
+     *
+     * 与MySQL对比：
+     * MySQL的解析器更复杂，支持预处理语句、存储过程、视图等高级特性，
+     * 而MYDB只支持最基本的SQL操作，便于理解核心原理。
+     *
+     * @param statement 待解析的SQL语句字节数组
+     * @return 解析后的语句对象，具体类型取决于SQL语句类型
+     * @throws Exception 解析过程中的各种异常
+     *
+     * 示例用法：
+     * <pre>
+     * byte[] sql = "SELECT * FROM users WHERE id = 1".getBytes();
+     * Select selectStmt = (Select) Parser.Parse(sql);
+     * </pre>
+     */
     public static Object Parse(byte[] statement) throws Exception {
+        // 创建词法分析器
         Tokenizer tokenizer = new Tokenizer(statement);
+        
+        // 获取第一个关键字，确定SQL语句类型
         String token = tokenizer.peek();
         tokenizer.pop();
 
         Object stat = null;
         Exception statErr = null;
+        
         try {
+            // 根据关键字分发到对应的解析方法
             switch(token) {
                 case "begin":
                     stat = parseBegin(tokenizer);
@@ -63,6 +135,8 @@ public class Parser {
         } catch(Exception e) {
             statErr = e;
         }
+        
+        // 检查是否还有未处理的token，确保语句完整性
         try {
             String next = tokenizer.peek();
             if(!"".equals(next)) {
@@ -74,6 +148,7 @@ public class Parser {
             byte[] errStat = tokenizer.errStat();
             statErr = new RuntimeException("Invalid statement: " + new String(errStat));
         }
+        
         if(statErr != null) {
             throw statErr;
         }
@@ -172,15 +247,38 @@ public class Parser {
         return insert;
     }
 
+    /**
+     * 解析SELECT语句
+     *
+     * 支持的语法格式：
+     * SELECT * FROM table_name [WHERE conditions]
+     * SELECT field1, field2, ... FROM table_name [WHERE conditions]
+     *
+     * 解析过程：
+     * 1. 解析字段列表：支持*通配符或具体字段名列表
+     * 2. 解析FROM子句：获取表名
+     * 3. 解析可选的WHERE子句：条件筛选
+     *
+     * 与MySQL对比：
+     * - MySQL支持复杂的SELECT：JOIN、子查询、聚合函数、GROUP BY、ORDER BY等
+     * - MYDB只支持基本的单表查询，适合理解查询处理的基本原理
+     *
+     * @param tokenizer 词法分析器
+     * @return Select语句对象
+     * @throws Exception 语法错误异常
+     */
     private static Select parseSelect(Tokenizer tokenizer) throws Exception {
         Select read = new Select();
 
+        // 解析字段列表
         List<String> fields = new ArrayList<>();
         String asterisk = tokenizer.peek();
         if("*".equals(asterisk)) {
+            // 处理SELECT *的情况
             fields.add(asterisk);
             tokenizer.pop();
         } else {
+            // 处理具体字段列表的情况
             while(true) {
                 String field = tokenizer.peek();
                 if(!isName(field)) {
@@ -188,6 +286,8 @@ public class Parser {
                 }
                 fields.add(field);
                 tokenizer.pop();
+                
+                // 检查是否有更多字段（逗号分隔）
                 if(",".equals(tokenizer.peek())) {
                     tokenizer.pop();
                 } else {
@@ -197,11 +297,13 @@ public class Parser {
         }
         read.fields = fields.toArray(new String[fields.size()]);
 
+        // 解析FROM关键字
         if(!"from".equals(tokenizer.peek())) {
             throw Error.InvalidCommandException;
         }
         tokenizer.pop();
 
+        // 解析表名
         String tableName = tokenizer.peek();
         if(!isName(tableName)) {
             throw Error.InvalidCommandException;
@@ -209,12 +311,15 @@ public class Parser {
         read.tableName = tableName;
         tokenizer.pop();
 
+        // 检查是否有WHERE子句
         String tmp = tokenizer.peek();
         if("".equals(tmp)) {
+            // 没有WHERE子句
             read.where = null;
             return read;
         }
 
+        // 解析WHERE子句
         read.where = parseWhere(tokenizer);
         return read;
     }
@@ -301,6 +406,33 @@ public class Parser {
         return drop;
     }
 
+    /**
+     * 解析CREATE TABLE语句
+     *
+     * 支持的语法格式：
+     * CREATE TABLE table_name field1 type1, field2 type2, ... (index field1, field2, ...)
+     *
+     * 语法特点：
+     * 1. 必须指定表名
+     * 2. 必须定义至少一个字段及其类型
+     * 3. 必须指定索引字段（MYDB要求每个表都要有索引）
+     * 4. 支持的数据类型：int32, int64, string
+     *
+     * 与MySQL对比：
+     * - MySQL CREATE TABLE语法更复杂：支持约束、外键、分区、存储引擎等
+     * - MYDB简化了语法：只支持基本字段定义和索引
+     * - MySQL索引是可选的，MYDB要求必须有索引
+     *
+     * 解析流程：
+     * 1. 验证TABLE关键字
+     * 2. 解析表名
+     * 3. 解析字段定义列表（字段名和类型）
+     * 4. 解析索引定义（必须存在）
+     *
+     * @param tokenizer 词法分析器
+     * @return Create语句对象
+     * @throws Exception 语法错误或表没有索引异常
+     */
     private static Create parseCreate(Tokenizer tokenizer) throws Exception {
         if(!"table".equals(tokenizer.peek())) {
             throw Error.InvalidCommandException;
