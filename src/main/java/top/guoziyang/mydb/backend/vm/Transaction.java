@@ -100,7 +100,7 @@ public class Transaction {
         t.xid = xid;
         t.level = level;
         
-        // 只有REPEATABLE_READ级别才创建快照
+        // 只有REPEATABLE_READ级别才创建快照（这里与InnoDB不同，这里简化了MVCC的快照读，在读已提交的隔离级别下直接去读取最新数据）
         if(level != 0) {
             t.snapshot = new HashMap<>();
             // 将所有当前活跃的事务ID加入快照

@@ -216,7 +216,7 @@ public class Recover {
             if (isInsertLog(log)) {
                 InsertLogInfo li = parseInsertLog(log);
                 long xid = li.xid;
-                if (!tm.isActive(xid)) {  // 事务已提交或已回滚
+                if (!tm.isActive(xid)) {  // 事务已提交或已回滚,说明可见
                     doInsertLog(pc, log, REDO);
                 }
             } else {
